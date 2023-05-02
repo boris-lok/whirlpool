@@ -2,10 +2,9 @@ use std::io::StdoutLock;
 use std::io::Write;
 
 use anyhow::Context;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use whirlpool::{Body, Message, Node};
+use whirlpool::{Body, main_loop, Message, Node};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -66,26 +65,6 @@ impl Node<Payload> for UniqueNode {
     }
 }
 
-fn main_loop<S, Payload>(mut state: S) -> anyhow::Result<()>
-where
-    S: Node<Payload>,
-    Payload: DeserializeOwned,
-{
-    let stdin = std::io::stdin().lock();
-    let mut stdout = std::io::stdout().lock();
-
-    let inputs = serde_json::Deserializer::from_reader(stdin).into_iter::<Message<Payload>>();
-
-    for input in inputs {
-        let input = input.context("Maelstrom input from STDIN could not be deserialized")?;
-        state
-            .step(input, &mut stdout)
-            .context("Node step function failed")?;
-    }
-
-    Ok(())
-}
-
 fn main() -> anyhow::Result<()> {
-    return main_loop(UniqueNode { id: 0 });
+    main_loop(UniqueNode { id: 0 })
 }
