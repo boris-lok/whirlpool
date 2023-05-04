@@ -4,7 +4,7 @@ use std::io::Write;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use whirlpool::{Init, main_loop, Message, Node};
+use whirlpool::{Event, Init, main_loop, Node};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -23,14 +23,22 @@ struct UniqueNode {
 }
 
 impl Node<(), Payload> for UniqueNode {
-    fn from_init(_state: (), init: Init) -> anyhow::Result<Self> {
+    fn from_init(
+        _state: (),
+        init: Init,
+        _tx: std::sync::mpsc::Sender<Event<Payload>>,
+    ) -> anyhow::Result<Self> {
         Ok(UniqueNode {
             node_id: init.node_id,
             id: 1,
         })
     }
 
-    fn step(&mut self, input: Message<Payload>, out: &mut StdoutLock) -> anyhow::Result<()> {
+    fn step(&mut self, input: Event<Payload>, out: &mut StdoutLock) -> anyhow::Result<()> {
+        let Event::Message(input) = input else {
+            panic!("echo should receive event message");
+        };
+
         let mut reply = input.into_reply(Some(&mut self.id));
         match reply.body.payload {
             Payload::Generate => {
@@ -47,5 +55,8 @@ impl Node<(), Payload> for UniqueNode {
 }
 
 fn main() -> anyhow::Result<()> {
-    main_loop::<_, UniqueNode, _>(())
+    main_loop::<_, UniqueNode, _, _>(())
 }
+
+
+// {"src": "c1", "dest": "n1", "body": {"type": "init", "msg_id": 1, "node_id": "n3", "node_ids": ["n1"]}}
