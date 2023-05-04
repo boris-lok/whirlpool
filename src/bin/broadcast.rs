@@ -3,6 +3,7 @@ use std::io::StdoutLock;
 use std::time::Duration;
 
 use anyhow::Context;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use whirlpool::{main_loop, Body, Event, Init, InjectedPayload, Message, Node};
@@ -95,6 +96,10 @@ impl Node<(), Payload, InjectedPayload> for BroadcastNode {
                         reply.send(out).context("serialize response topology")?;
                     }
                     Payload::Gossip { seen } => {
+                        self.known
+                            .get_mut(&reply.dst)
+                            .expect("got gossip from unknown node")
+                            .extend(seen.iter().copied());
                         self.messages.extend(seen);
                     }
                     Payload::BroadcastOk { .. }
@@ -105,16 +110,34 @@ impl Node<(), Payload, InjectedPayload> for BroadcastNode {
             Event::Injected(payload) => match payload {
                 InjectedPayload::Gossip => {
                     for n in &self.neighbours {
-                        let n_knows = &self.known[n];
+                        let known_to_n = &self.known[n];
+                        let (already_known, mut notify_of): (HashSet<_>, HashSet<_>) = self
+                            .messages
+                            .iter()
+                            .copied()
+                            .partition(|m| known_to_n.contains(m));
+                        // if we know that n knows m, we don't tell n that _we_ know m, so n will
+                        // send us m for all eternity. so, we include a couple of extra `m`s so
+                        // they gradually know all the things that we know without sending lots of
+                        // extra stuff each time.
+                        // we cap the number of extraneous `m`s we include to be at most 10% of the
+                        // number of `m`s` we _have_ to include to avoid excessive overhead.
+                        let mut rng = rand::thread_rng();
+                        let additional_cap = (10 * notify_of.len()) / 100;
+                        notify_of.extend(already_known.iter().filter(|_| {
+                            rng.gen_ratio(
+                                additional_cap.min(already_known.len()) as u32,
+                                already_known.len() as u32,
+                            )
+                        }));
+
                         Message {
                             src: self.node_id.clone(),
                             dst: n.clone(),
                             body: Body {
                                 id: None,
                                 in_reply_to: None,
-                                payload: Payload::Gossip {
-                                    seen: self.messages.difference(n_knows).copied().collect(),
-                                },
+                                payload: Payload::Gossip { seen: notify_of },
                             },
                         }
                         .send(out)
