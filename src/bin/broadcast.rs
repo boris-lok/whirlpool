@@ -3,7 +3,6 @@ use std::io::StdoutLock;
 use std::time::Duration;
 
 use anyhow::Context;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use whirlpool::{main_loop, Body, Event, Init, InjectedPayload, Message, Node};
@@ -47,7 +46,7 @@ impl Node<(), Payload, InjectedPayload> for BroadcastNode {
             // generate gossip events
             // TODO: handle EOF
             loop {
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::sleep(Duration::from_millis(500));
                 if tx.send(Event::Injected(InjectedPayload::Gossip)).is_err() {
                     break;
                 }
@@ -111,25 +110,10 @@ impl Node<(), Payload, InjectedPayload> for BroadcastNode {
                 InjectedPayload::Gossip => {
                     for n in &self.neighbours {
                         let known_to_n = &self.known[n];
-                        let (already_known, mut notify_of): (HashSet<_>, HashSet<_>) = self
-                            .messages
-                            .iter()
+                        let notify_of = self.messages
+                            .difference(known_to_n)
                             .copied()
-                            .partition(|m| known_to_n.contains(m));
-                        // if we know that n knows m, we don't tell n that _we_ know m, so n will
-                        // send us m for all eternity. so, we include a couple of extra `m`s so
-                        // they gradually know all the things that we know without sending lots of
-                        // extra stuff each time.
-                        // we cap the number of extraneous `m`s we include to be at most 10% of the
-                        // number of `m`s` we _have_ to include to avoid excessive overhead.
-                        let mut rng = rand::thread_rng();
-                        let additional_cap = (10 * notify_of.len()) / 100;
-                        notify_of.extend(already_known.iter().filter(|_| {
-                            rng.gen_ratio(
-                                additional_cap.min(already_known.len()) as u32,
-                                already_known.len() as u32,
-                            )
-                        }));
+                            .collect();
 
                         Message {
                             src: self.node_id.clone(),
